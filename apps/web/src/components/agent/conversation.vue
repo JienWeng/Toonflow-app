@@ -37,6 +37,7 @@
         </div>
       </div>
     </section>
+    <p v-if="localCodexRunning" class="localCodexHint" role="status">Local Codex is responding. Wait for it to finish, or stop this turn before sending another message.</p>
     <messageInput
       ref="input"
       v-model:selectedModel="selectedModel"
@@ -45,7 +46,7 @@
       v-model:voiceActive="voiceActive"
       v-model:restoringAttachment="restoringAttachment"
       :active="active"
-      :disabled="disabled || compacting || (busy && (!sessionFile || !remoteRunning))"
+      :disabled="disabled || compacting || localCodexRunning || (busy && (!sessionFile || !remoteRunning))"
       :busy="busy"
       :submitting="submitting"
       :remoteRunning="remoteRunning"
@@ -108,7 +109,7 @@ const voiceActive = ref(false);
 const locked = computed(() => props.disabled || busy.value || submitting.value || stopping.value || projectStops.value > 0 || deletingId.value !== undefined || restoringAttachment.value || voiceActive.value);
 const editingId = ref<string>();
 const queueLocked = computed(() => !props.active || props.disabled || submitting.value || stopping.value || projectStops.value > 0
-  || compacting.value || deletingId.value !== undefined || restoringAttachment.value || voiceActive.value || editingId.value !== undefined);
+  || localCodexRunning.value || compacting.value || deletingId.value !== undefined || restoringAttachment.value || voiceActive.value || editingId.value !== undefined);
 let controller: AbortController | undefined;
 let queueController: AbortController | undefined;
 let runId = props.initialSession?.runId;
@@ -122,6 +123,7 @@ const selectedModel = ref(pendingMessage?.model ?? (props.initialSession?.provid
   ? JSON.stringify([props.initialSession.providerId, props.initialSession.modelId]) : props.initialModel ?? ""));
 const reasoningEffort = ref(pendingMessage?.reasoningEffort ?? props.initialSession?.thinkingLevel ?? "");
 const selectedModelChoice = useNodeModelSelection(modelChoices, selectedModel);
+const localCodexRunning = computed(() => (selectedModelChoice.value?.providerId ?? props.initialSession?.providerId) === "localCodex" && (busy.value || remoteRunning.value));
 const contextWindow = computed(() => contextUsage.value?.contextWindow ?? selectedModelChoice.value?.contextWindow ?? 262144);
 function showSteeringMessage(message: AgentQueuedMessage) {
   if (messages.value.some(item => item.role === "user" && (item.queueId === message.id || item.id === message.id))) return;
@@ -207,6 +209,7 @@ function receiveEvent(event: AgentEvent) {
 defineExpose({ receiveEvent, beginProjectStop, getRunId: () => runId, getSelectedModel: () => selectedModel.value });
 
 function submitMessage(mode?: "steer" | "followUp") {
+  if (localCodexRunning.value) return;
   if (busy.value || remoteRunning.value) return sendQueuedMessage(mode ?? "followUp");
   return sendMessage(editingId.value ? messages.value.find(item => item.id === editingId.value) : undefined);
 }
@@ -719,6 +722,14 @@ onBeforeUnmount(abortRequest);
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+
+  .localCodexHint {
+    flex-shrink: 0;
+    margin: 8px 24px;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+  }
 
   .compactionStatus {
     display: flex;

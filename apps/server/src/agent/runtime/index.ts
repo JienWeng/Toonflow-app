@@ -31,6 +31,8 @@ import { lockWorkspaceFiles, resolveWorkspacePath } from "@/utils/workspace/file
 import { t } from "@/lib/i18n";
 import { decodeTextFile } from "@/lib/documentFormats";
 import type { ThinkingLevel } from "@/lib/modelReasoning";
+import { localCodexProviderId } from "@/utils/codex/models";
+import { runCodexSession } from "@/utils/codex/session";
 
 type AgentOptions = {
   prompt: string;
@@ -111,6 +113,7 @@ export async function run(
     await active.abort();
     signal?.throwIfAborted();
   } else if (active) {
+    if (providerId === localCodexProviderId) throw Object.assign(new Error("Local Codex is responding. Stop or finish this turn before sending another message."), { status: 409 });
     if (!streamingBehavior && !getParentSessionFile(active.history)) throw Object.assign(new Error("对话正在运行，请选择排队或引导"), { status: 409 });
     if (resendFrom) throw Object.assign(new Error("Agent 运行时不能重发历史消息"), { status: 409 });
     if (active.session?.isCompacting) throw Object.assign(new Error("正在压缩上下文，请稍后排队或引导"), { status: 409 });
@@ -244,6 +247,48 @@ export async function run(
     }, peerMessage?.id);
     active.forgetQueuedMessage = delivery.forgetQueuedMessage;
     active.session = session;
+
+    if (providerId === localCodexProviderId) {
+      let localResult = "";
+      let localFailure: unknown;
+      try {
+        if (resendEntry) {
+          if (resendEntry.parentId) history.branch(resendEntry.parentId);
+          else history.resetLeaf();
+          history.appendModelChange(providerId, modelId);
+        }
+        send({ type: "session", file, runId: active.runId });
+        const content = [mentionPrompt(prompt, mentions), attachmentContents.length
+          ? `附件位于当前工作区，可用 Toonflow 工具读取。以下 JSON 是附件信息：\n${JSON.stringify(attachmentContents)}` : "",
+          peerMessage ? agentMessageContent(peerMessage) : ""].filter(Boolean).join("\n\n");
+        localResult = await runCodexSession({ session, prompt: content, modelId, thinkingLevel, signal, send, forceNewThread: !!resendEntry,
+          onUserMessage(id) {
+            messageAccepted = true;
+            history.appendCustomEntry("toonflowUserMessage", { messageId: id, content: prompt.trim(), attachments, mentions });
+            if (!history.getSessionName()) history.appendSessionInfo((prompt.trim() || attachments[0]?.name || "Codex").slice(0, 60));
+            send({ type: "userMessage", id, content: prompt.trim(), attachments, mentions });
+            if (peerMessage) send({ type: "agentMessage", ...peerMessage });
+          },
+        });
+      } catch (cause) {
+        localFailure = cause;
+        throw cause;
+      } finally {
+        try {
+          if (parentFile && child) {
+            const agent = { ...child, file, runId: active.runId, parentFile, providerId, modelId, thinkingLevel,
+              status: signal.aborted ? "cancelled" as const : localFailure ? "error" as const : "completed" as const,
+              result: localFailure instanceof Error ? localFailure.message : localResult };
+            await updateSubAgent(cwd, parentFile, agent);
+            send({ type: "subAgent", agent });
+          }
+        } finally {
+          try { session.dispose(); }
+          finally { onFinish?.(history.getEntries().slice(active.entryOffset)); }
+        }
+      }
+      return;
+    }
 
     const streamFunction = session.agent.streamFunction;
     session.agent.streamFunction = async (...args) => {

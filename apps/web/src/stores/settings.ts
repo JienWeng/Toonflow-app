@@ -103,7 +103,7 @@ export const privacySettings = computed(() => {
   const raw = settings.value.privacy;
   const privacy = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   return {
-    dataCollectionEnabled: privacy.dataCollectionEnabled !== false,
+    dataCollectionEnabled: privacy.dataCollectionEnabled === true,
     anonymousId: typeof privacy.anonymousId === "string" ? privacy.anonymousId : "",
   };
 });
@@ -116,9 +116,7 @@ export const toonflowAccountToken = computed(() => {
 });
 export const customProviders = computed<CustomProvider[]>(() => {
   const providers = Array.isArray(settings.value.customProviders) ? [...settings.value.customProviders] : [];
-  const accountProvider = settings.value.toonflowProvider as CustomProvider | null | undefined;
-  if (toonflowAccountToken.value && (accountProvider?.id === "Toonflow" || accountProvider?.id === "toonflow")) providers.unshift(accountProvider);
-  return providers.filter((item): item is CustomProvider => !!item && typeof item.id === "string" && typeof item.label === "string" && Array.isArray(item.models)
+  return providers.filter((item): item is CustomProvider => !!item && typeof item.id === "string" && !["toonflow", "localcodex"].includes(item.id.toLowerCase()) && typeof item.label === "string" && Array.isArray(item.models)
     && item.models.every((model: CustomProviderModel) => !!model && typeof model.id === "string" && typeof model.label === "string"));
 });
 
@@ -191,7 +189,6 @@ export async function loadSettings() {
   // 等初始化引发的监听执行完，再允许自动保存。
   await nextTick();
   settingsReady = true;
-  void refreshToonflowProvider();
 }
 
 export function saveSettings(update?: (current: Record<string, unknown>) => Record<string, unknown> | undefined, signal?: AbortSignal) {
@@ -258,7 +255,3 @@ watch(settings, () => {
       ? "设置已更新，请重新读取后保存" : "设置保存失败，请稍后重试");
   });
 }, { deep: true, flush: "sync" });
-
-watch([() => settings.value.toonflowAccount, multiTenantEnabled], () => {
-  if (settingsReady) void refreshToonflowProvider();
-}, { flush: "sync" });

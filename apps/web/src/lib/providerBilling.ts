@@ -2,7 +2,7 @@ import { translate } from "@toonflow/i18n/vue";
 import axios from "axios";
 import { onScopeDispose, ref, watch } from "vue";
 import type { ProviderBalance } from "@toonflow/providers";
-import { multiTenantEnabled, settings, toonflowAccountToken } from "@/stores/settings";
+import { multiTenantEnabled, settings } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
 
 type BalanceSnapshot = { accountId: string; balance: ProviderBalance | null; revision: number };
@@ -78,11 +78,9 @@ export function useProviderBalances() {
   function syncProviders() {
     if (multiTenantEnabled.value) { providerBalances.value = []; return; }
     const configs = settings.value.mediaProviderConfigs as Record<string, Record<string, unknown>> | undefined;
-    const accountProvider = settings.value.toonflowProvider as { id?: string } | null | undefined;
     const previousEntries = new Map(providerBalances.value.map(entry => [entry.id, entry]));
-    providerBalances.value = providers.filter(item => item.supportsBalance
-      && (item.id !== "toonflow" || (toonflowAccountToken.value && (accountProvider?.id === "Toonflow" || accountProvider?.id === "toonflow")))).map(provider => {
-      const configKey = JSON.stringify([configs?.[provider.id] ?? {}, provider.id === "toonflow" ? toonflowAccountToken.value : ""]);
+    providerBalances.value = providers.filter(item => item.supportsBalance && item.id !== "toonflow").map(provider => {
+      const configKey = JSON.stringify(configs?.[provider.id] ?? {});
       const previous = previousEntries.get(provider.id);
       if (previous?.configKey === configKey) {
         previous.label = provider.label;

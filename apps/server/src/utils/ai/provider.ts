@@ -66,8 +66,7 @@ export function getAccountProvider() {
 
 export function getConfiguredProviders() {
   const providers = conf.get("settings", {}).customProviders;
-  const account = getAccountProvider();
-  return [...(account ? [account] : []), ...(Array.isArray(providers) ? providers.filter(item => typeof item?.id !== "string" || item.id.toLowerCase() !== "toonflow") : [])];
+  return Array.isArray(providers) ? providers.filter(item => typeof item?.id !== "string" || !["toonflow", "localcodex"].includes(item.id.toLowerCase())) : [];
 }
 
 const builtinModels: Model<KnownApi>[] = getBuiltinProviders().flatMap(provider => getBuiltinModels(provider));

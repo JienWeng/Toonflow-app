@@ -16,6 +16,8 @@ import { browserRuntime } from "@/utils/browser";
 import conf from "@/utils/conf";
 import type { ThinkingLevel } from "@/lib/modelReasoning";
 import type { SingleAgentEvent, SingleAgentResult, SingleAgentStatus, SingleAgentToolDescriptor, SingleAgentToolReference, SingleAgentToolResult } from "./types";
+import { localCodexProviderId } from "@/utils/codex/models";
+import { runCodexSession } from "@/utils/codex/session";
 
 type ClientCall = {
   finish(result: SingleAgentToolResult | Error): void;
@@ -240,6 +242,18 @@ export async function run(options: {
     let messageIndex = 0;
     configureAgentRequests(session, undefined, active.controller.signal, replyTo => send({ type: "retry", blockPrefix: `${messageIndex}:`, replyTo }));
     active.session = session;
+    if (options.providerId === localCodexProviderId) {
+      const text = await runCodexSession({ session, prompt: options.prompt, modelId: options.modelId,
+        thinkingLevel: options.thinkingLevel, signal: active.controller.signal, images: options.images, send,
+        onToolResult(id, name, result) {
+          const item = { id, name, result };
+          toolResults.push(item);
+          if (options.includeToolResults) send({ type: "toolResult", ...item });
+        },
+      });
+      send({ type: "complete", text, toolResults });
+      return;
+    }
     active.controller.signal.throwIfAborted();
     const streamFunction = session.agent.streamFunction;
     session.agent.streamFunction = async (...args) => {

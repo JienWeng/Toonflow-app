@@ -13,11 +13,28 @@ import { readDocument } from "@/utils/documents";
 import { getConfiguredProviders, getModelLimits, getModelReasoning, getProviderBaseUrl, providerSchema } from "@/utils/ai/provider";
 import { modelGateway, requireDirectModelAccess } from "@/utils/multiTenant/gateway";
 import { createBillingUsageTracker } from "@/utils/ai/billingUsage";
+import { codexStatus, listLocalCodexModels, localCodexProviderId } from "@/utils/codex/models";
+import { findModelContextLimits } from "@/utils/ai/modelContextLimits";
+import { streamCodexText } from "@/utils/codex/stream";
 
 export { fetchProviderModels } from "@/utils/ai/models";
 export { accountProviderSchema, getAccountProvider, getAccountToken, getConfiguredProviders, getModelLimits, getModelReasoning, providerSchema, reasoningEffortsSchema } from "@/utils/ai/provider";
 
 export async function getConfiguredModel(providerId: string, modelId: string) {
+  if (providerId === localCodexProviderId) {
+    requireDirectModelAccess();
+    const status = await codexStatus();
+    const local = status.models.find(model => model.id === modelId);
+    if (!local) throw Object.assign(new Error(status.models.length ? "本地 Codex 模型不存在，请刷新连接" : status.message), { status: 400 });
+    const limits = findModelContextLimits(modelId);
+    // SDK 仅用于现有会话与工具封装；本地分支不会向此占位地址发送模型请求。
+    const provider: z.infer<typeof providerSchema> = { apiUrl: "http://127.0.0.1", apiKey: "local-session",
+      protocol: "openai-responses", models: [{ id: local.id, label: local.label }] };
+    return { provider, model: { id: local.id, label: local.label, reasoning: local.reasoningLevels.length > 0,
+      reasoningLevels: local.reasoningLevels, thinkingLevelMap: Object.fromEntries(local.reasoningLevels.map(level => [level, level])),
+      compat: undefined, contextWindow: limits?.contextWindow ?? 262144, maxOutputTokens: limits?.maxTokens ?? 32768 },
+      baseUrl: provider.apiUrl, execution: undefined, route: undefined, revision: undefined, publicProviderId: providerId, publicModelId: modelId };
+  }
   const execution = modelGateway.enabled() ? await modelGateway.resolve("text", providerId, modelId) : undefined;
   const resolved = execution?.upstream;
   const parsed = providerSchema.safeParse(resolved?.provider ?? getConfiguredProviders().find(item => item?.id === providerId));
@@ -42,7 +59,7 @@ export type ConfiguredModel = Awaited<ReturnType<typeof getConfiguredModel>>;
 
 export async function listAiModels() {
   if (modelGateway.enabled()) return modelGateway.catalog(["text"]);
-  return getConfiguredProviders().flatMap(item => {
+  const models = getConfiguredProviders().flatMap(item => {
     const parsed = providerSchema.extend({ id: z.string().min(1), label: z.string() }).safeParse(item);
     if (!parsed.success) return [];
     const provider = parsed.data;
@@ -55,6 +72,7 @@ export async function listAiModels() {
       };
     });
   });
+  return [...await listLocalCodexModels(), ...models];
 }
 
 export function publicAiMessage(configured: ConfiguredModel, message: AssistantMessage, usageKnown = true) {
@@ -149,6 +167,7 @@ export function streamAi(
   signal: AbortSignal,
   references: Awaited<ReturnType<typeof readAiReferences>> = [],
 ) {
+  if (configured.publicProviderId === localCodexProviderId) return streamCodexText(configured.publicModelId, context, signal, references);
   const { provider, model: configuredModel, baseUrl } = configured;
   const model: Model<typeof provider.protocol> = {
     id: configuredModel.id, name: configuredModel.label, provider: "toonflow", api: provider.protocol, baseUrl,

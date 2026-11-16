@@ -4,6 +4,8 @@ import type { ThinkingLevel } from "@/lib/modelReasoning";
 import { getConfiguredModel } from "@/utils/ai";
 import { currentIdentity } from "@/utils/multiTenant/context";
 import { t } from "@/lib/i18n";
+import { localCodexProviderId } from "@/utils/codex/models";
+import { streamCodexText } from "@/utils/codex/stream";
 
 export async function getAgentModelConfiguration(providerId: string, modelId: string, thinkingLevel?: ThinkingLevel) {
   const configured = await getConfiguredModel(providerId, modelId);
@@ -30,6 +32,9 @@ export async function createAgentModel(providerId: string, modelId: string, thin
   runtime.registerProvider(providerId, {
     api: provider.protocol,
     baseUrl,
+    ...(providerId === localCodexProviderId ? {
+      streamSimple: (model, context, options) => streamCodexText(model.id, context, options?.signal ?? new AbortController().signal, [], options?.reasoning),
+    } satisfies Pick<Parameters<typeof runtime.registerProvider>[1], "streamSimple"> : {}),
     // SDK 将配置头解析为命令或环境变量；转义后仅按用户填写的字面值发送。
     headers: provider.headers && Object.fromEntries(Object.entries(provider.headers).map(([name, value]) => [
       name, value.replace(/\$/g, () => "$$").replace(/^!/, "$!"),

@@ -14,8 +14,9 @@ let saveQueue = Promise.resolve();
 export default router.put("/", validateFields({ expectedRevision: z.number().int().min(0).max(2147483646).optional(), settings: z.record(z.string(), z.json()).and(z.object({
   agentSystemPrompt: z.string().max(maxSystemPromptLength, { error: () => t`系统提示词不能超过 ${maxSystemPromptLength} 个字符` }).optional(),
   agentNodeTools: nodeToolPermissionsSchema.optional(),
+  localCodex: z.object({ enabled: z.boolean(), executable: z.string().trim().min(1).max(4096) }).optional(),
   customProviders: z.array(providerSchema.extend({
-    id: z.string().min(1).refine(value => value.toLowerCase() !== "toonflow", "toonflow 为账号供应商保留 ID"), label: z.string(),
+    id: z.string().min(1).refine(value => !["toonflow", "localcodex"].includes(value.toLowerCase()), "toonflow 和 localCodex 为内置供应商保留 ID"), label: z.string(),
   })).optional(),
   toonflowProvider: accountProviderSchema.nullable().optional(),
   network: u.network.networkSchema.optional(),
